@@ -73,3 +73,36 @@ https://www.bilibili.com/video/BV1R7411t71W
 http://nil.csail.mit.edu/6.824/2020/papers/mapreduce.pdf
 
 MapReduce本身只是一个模型，实际的代码实现细节会因人而异。MapReduce的细节等我看完论文再写。
+
+这是一个分布式系统的MapReduce构建模型，这个模型也是lab1里面要构建的代码的模型所以就挑这个来说了
+![Alt text](picture/a%20model%20of%20mapredcue.png)
+
+步骤顺序与上面的编号顺序一致
+## 步骤1 fork
+首先假设有一个用户程序，然后我们这堆代码是一个写好的mapreduce库，用户调用mapreduce,传递三个参数：用户定义规则的map函数，用户定义规则的reduce规则的reduce函数，输入文件。然后该代码会将输入文件分成M片，每片的长度在16MB到64MB（用户可以通过可选的参数控制），然后它在分布式集群中启动(fork)节点，运行用户自定义的规则。
+
+## 步骤2 assign map/reduce
+启动的有一个节点是特殊的-->master节点。
+其他启动的节点都是worker节点，他们的具体行为由主节点控制，因为输入为M个分区，输出为R个分区，因此有M个map任务和R个reduce任务要分配。master挑选空闲的worker,并为他分配一个map任务或者一个reduce任务。
+
+## 步骤3 read
+当worker被分配到一个map任务后，读取对应的分区，它从输入数据中解析key/value，并将每对传递给用户定义的map函数中。map函数生成中间键缓存在内存中。
+
+## 步骤4 local write
+
+缓存的k/v会定期写入本地磁盘，并由分区函数分在制定的一块R分区中(hash然后对R取模，很简单的思想),然后他们在本地磁盘的位置被传回主节点，主节点负责将这些位置传发给reduce工作节点。
+
+## 步骤5 remote read
+
+做好map后，master会通知一个节点执行Reduce，他会发送给这个map的位置信息，文件名，然后Reduce拿到位置信息，使用rpc(remote procedure calls)远程过程调用从Map Worker的本地磁盘中间数据k/v。当Reduce Worker读取所有中间数据时，它会按key的字典序进行排序，以便合并相同key（双指针）。如果中间数据过多，内存无法容纳，则使用外部排序。
+
+## 步骤6 write
+
+Reduce Worker 迭代排序后的中间数据，对于遇到的每个不重复（unique）的key,他将k/v传递给reduce函数，reduce输出到该分区的最终输出文件中。
+
+## final
+
+当所有map任务和reduce任务完成后，master唤醒用户程序。此时，用户程序中的MapReduce调用返回到用户代码。成功完成后，mapreduce 执行的输出可在 R 输出文件中获得（每个reduce 任务一个，文件名由用户指定）。通常，用户不需要将这些 R 输出文件合并到一个文件中——他们通常将这些文件作为输入传递给另一个 MapReduce 调用，或者从另一个能够处理划分为多个文件的输入的分布式应用程序中使用它们。
+
+
+
