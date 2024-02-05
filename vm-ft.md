@@ -47,5 +47,12 @@ log entry中应该包含：
 
 ## 不确定性指令执行过程：
 primary：
-1. Hypervisor在primary执行指令时设置中断
+1. Hypervisor在primary执行指令时设置中断(这个中断什么意思？)
 2. Hyperviosr执行指令并记录结果
+3. 发送结果和指令序号到backup
+backup:
+1. Hypervisor读log entry， 在该指令序号处设置中断
+2. Hypervisor应用从primary执行得到的结果，自己产生的结果被丢弃，从而保证主备一致性
+
+## 输出要求和规则
+输出要求：若primary发生故障后且backup接管后
