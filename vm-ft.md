@@ -55,4 +55,37 @@ backup:
 2. Hypervisor应用从primary执行得到的结果，自己产生的结果被丢弃，从而保证主备一致性
 
 ## 输出要求和规则
-输出要求：若primary发生故障后且backup接管后
+`输出要求`：若primary发生故障后且backup接管后, backup必须以一种与原primary已发送到外部的输出完全一致的方式运行。
+
+可能有一种特殊情况会发生：如果 primary 在执行输出操作后立即故障，backup 在完成接管之前，可能还未执行到同样的输出操作，就被其他不确定事件所影响（ 如计时中断 ），这样 backup 就无法以与 primary 发生故障时的相同状态上线，为此提出了 `输出规则` 。
+
+`输出规则`：primary必须延后将输出发送到外部世界的动作，知道backup已经接收并确认与产生该输出相关的log entry。
+
+基于输出规则， primary和backup的交互如下：
+![Alt text](picture/primary_and_backup.png)
+
+从这幅图中不难看出，log entry同步时采用异步操作，因此不会堵塞住下一个的输入，当输入来临时，可以清楚的看到，当要执行outoperation操作时，等待了backup的out操作结束。
+
+*一些故障发生情况：*
+
+ 1. 如果 primary 在收到 ACK 之前故障，它不会返回结果给 client ，由于 backup 的输出会被丢弃，所以两者在 client 看来是一致的，即未收到 server 回复 。
+ 2.如果 primary 在发送输出后故障，backup 在接管后也执行发送，client 会收到两次输出 。但是这种情况不会造成不良后果，因为对于 TCP 连接来说，它会处理重复的数据包；对于磁盘来说，会对同一块存储区覆盖写入 。（也就说当backup接管后，会重放最会后一次指令？）  
+
+
+
+## 故障检测
+两种 VM 都有可能发生故障：
+
+如果是 backup 故障，primary 将停止在 logging channel 上发送 log entry ，并继续执行
+如果是 primary 故障，backup 会继续重放 log entries ，重放结束后 上线 成为 primary ，此时，它可以向外界生成输出 。
+VM-FT 检测故障的方式有 UDP 心跳检测和监控 logging channel 中的流量以及 backup 发送给 primary 的 ACK 。若心跳或日志流量停止的时间超过了特定超时时间（ 大约几秒 ），就会声明故障 。
+
+这样的故障检测方法，在有网络故障时，容易遇到 split-brain 问题：即 primary 和 backup 之间通信断开，但此时 primary 还在运行，若 backup 此时上线，会造成两者同时执行的问题，可能会导致数据损坏 。
+
+为解决 split-brain 问题，使 Disk Server 支持 atomic test-and-set 测试，即在 Disk Server 上维护一个 flag ，第一个访问此 flag 的 VM 会成为 primary ，第二个访问此 flag 的 VM 不会上线 。（ 类似于锁 ）
+
+## 恢复冗余
+
+primary 发生故障，backup 上线时，在新的物理机上建立 backup ，恢复冗余，继续进入到容错状态 。
+
+VM vSephere 实现了一个集群服务，用于维护管理和资源信息。当发生故障时，集群服务根据资源使用情况和其他约束来确定新的 backup 的最佳服务器，并将其复制成为 backup 。其结果是，VM-FT 通常可以在服务器发生故障后几分钟内重新建立冗余，而在执行容错转移时不会产生任何明显的中断 。
