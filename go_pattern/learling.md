@@ -1,0 +1,1 @@
+本章没什么好学的，唯一的收获就是go channel中make(chan int)和make(chan int, 1)居然不是同一个东西
