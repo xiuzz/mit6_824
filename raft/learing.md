@@ -916,3 +916,5 @@ func (rf *Raft) startElection() {
 }
 
 ```
+
+![alt text](<../picture/image copy 2.png>)
